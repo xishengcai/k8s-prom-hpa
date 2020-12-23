@@ -10,4 +10,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: custom-metrics-apiserver
-  namespace: monitoring
+  namespace: lstack-system

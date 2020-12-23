@@ -14,7 +14,7 @@ observed CPU utilization and later on based on memory usage.
 In Kubernetes 1.6 a new API Custom Metrics API was introduced that enables HPA access to arbitrary metrics. 
 And Kubernetes 1.7 introduced the aggregation layer that allows 3rd party applications to extend the 
 Kubernetes API by registering themselves as API add-ons. 
-The Custom Metrics API along with the aggregation layer made it possible for monitoring systems 
+The Custom Metrics API along with the aggregation layer made it possible for lstack-system systems 
 like Prometheus to expose application-specific metrics to the HPA controller.
 
 The Horizontal Pod Autoscaler is implemented as a control loop that periodically queries 
@@ -70,92 +70,6 @@ View pods metrics:
 kubectl get --raw "/apis/metrics.k8s.io/v1beta1/pods" | jq .
 ```
 
-### Auto Scaling based on CPU and memory usage
-
-You will use a small Golang-based web app to test the Horizontal Pod Autoscaler (HPA).
-
-Deploy [podinfo](https://github.com/stefanprodan/k8s-podinfo) to the `default` namespace:
-
-```bash
-kubectl create -f ./podinfo/podinfo-svc.yaml,./podinfo/podinfo-dep.yaml
-```
-
-Access `podinfo` with the NodePort service at `http://<K8S_PUBLIC_IP>:31198`.
-
-Next define a HPA that maintains a minimum of two replicas and scales up to ten 
-if the CPU average is over 80% or if the memory goes over 200Mi:
-
-```yaml
-apiVersion: autoscaling/v2beta2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: podinfo
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: podinfo
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 80
-  - type: Resource
-    resource:
-      name: memory
-        target:
-          type: AverageValue
-          averageValue: 200Mi
-```
-
-Create the HPA:
-
-```bash
-kubectl create -f ./podinfo/podinfo-hpa.yaml
-```
-
-After a couple of seconds the HPA controller contacts the metrics server and then fetches the CPU 
-and memory usage:
-
-```bash
-kubectl get hpa
-
-NAME      REFERENCE            TARGETS                      MINPODS   MAXPODS   REPLICAS   AGE
-podinfo   Deployment/podinfo   2826240 / 200Mi, 15% / 80%   2         10        2          5m
-```
-
-In order to increase the CPU usage, run a load test with `rakyll/hey`:
-
-```bash
-#install hey
-go get -u github.com/rakyll/hey
-
-#do 10K requests
-hey -n 10000 -q 10 -c 5 http://<K8S_PUBLIC_IP>:31198/
-```
-
-You can monitor the HPA events with:
-
-```bash
-$ kubectl describe hpa
-
-Events:
-  Type    Reason             Age   From                       Message
-  ----    ------             ----  ----                       -------
-  Normal  SuccessfulRescale  7m    horizontal-pod-autoscaler  New size: 4; reason: cpu resource utilization (percentage of request) above target
-  Normal  SuccessfulRescale  3m    horizontal-pod-autoscaler  New size: 8; reason: cpu resource utilization (percentage of request) above target
-```
-
-Remove `podinfo` for the moment. You will deploy it again later on in this tutorial:
-
-```bash
-kubectl delete -f ./podinfo/podinfo-hpa.yaml,./podinfo/podinfo-dep.yaml,./podinfo/podinfo-svc.yaml
-```
-
 ### Setting up a Custom Metrics Server 
 
 In order to scale based on custom metrics you need to have two components. 
@@ -166,26 +80,10 @@ And a second component that extends the Kubernetes custom metrics API with the m
 
 You will deploy Prometheus and the adapter in a dedicated namespace. 
 
-Create the `monitoring` namespace:
+Create the `lstack-system` namespace:
 
 ```bash
 kubectl create -f ./namespaces.yaml
-```
-
-Deploy Prometheus v2 in the `monitoring` namespace:
-
-*If you are deploying to GKE you might get an error saying: `Error from server (Forbidden): error when creating`
-This will help you resolve that issue:* [RBAC on GKE](https://github.com/coreos/prometheus-operator/blob/master/Documentation/troubleshooting.md)
-
-```bash
-kubectl create -f ./prometheus
-```
-
-Generate the TLS certificates needed by the Prometheus adapter:
-
-```bash
-touch metrics-ca.key metrics-ca.crt metrics-ca-config.json
-make certs
 ```
 
 Deploy the Prometheus custom metrics API adapter:
@@ -200,111 +98,81 @@ List the custom metrics provided by Prometheus:
 kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1" | jq .
 ```
 
-Get the FS usage for all the pods in the `monitoring` namespace:
+Get the http_request for all the pods in the `lstack-system` namespace:
 
 ```bash
-kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1/namespaces/monitoring/pods/*/kubelet_container_log_filesystem_used_bytes" | jq .
-```
-
-### Auto Scaling based on custom metrics
-
-Create `podinfo` NodePort service and deployment in the `default` namespace:
-
-```bash
-kubectl create -f ./podinfo/podinfo-svc.yaml,./podinfo/podinfo-dep.yaml
-```
-
-The `podinfo` app exposes a custom metric named `http_requests_total`. 
-The Prometheus adapter removes the `_total` suffix and marks the metric as a counter metric.
-
-Get the total requests per second from the custom metrics API:
-
-```bash
-kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1/namespaces/default/pods/*/http_requests" | jq .
+kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1/namespaces/default/services/*/istio_requests_per_min" | jq .
 ```
 ```json
 {
   "kind": "MetricValueList",
   "apiVersion": "custom.metrics.k8s.io/v1beta1",
   "metadata": {
-    "selfLink": "/apis/custom.metrics.k8s.io/v1beta1/namespaces/default/pods/%2A/http_requests"
+    "selfLink": "/apis/custom.metrics.k8s.io/v1beta1/namespaces/default/services/%2A/istio_requests_per_min"
   },
   "items": [
     {
       "describedObject": {
-        "kind": "Pod",
+        "kind": "Service",
         "namespace": "default",
-        "name": "podinfo-6b86c8ccc9-kv5g9",
-        "apiVersion": "/__internal"
+        "name": "details",
+        "apiVersion": "/v1"
       },
-      "metricName": "http_requests",
-      "timestamp": "2018-01-10T16:49:07Z",
-      "value": "901m"
+      "metricName": "istio_requests_per_min",
+      "timestamp": "2020-12-23T03:43:00Z",
+      "value": "133333m"
     },
     {
       "describedObject": {
-        "kind": "Pod",
+        "kind": "Service",
         "namespace": "default",
-        "name": "podinfo-6b86c8ccc9-nm7bl",
-        "apiVersion": "/__internal"
+        "name": "productpage",
+        "apiVersion": "/v1"
       },
-      "metricName": "http_requests",
-      "timestamp": "2018-01-10T16:49:07Z",
-      "value": "898m"
+      "metricName": "istio_requests_per_min",
+      "timestamp": "2020-12-23T03:43:00Z",
+      "value": "0"
+    },
+    {
+      "describedObject": {
+        "kind": "Service",
+        "namespace": "default",
+        "name": "reviews",
+        "apiVersion": "/v1"
+      },
+      "metricName": "istio_requests_per_min",
+      "timestamp": "2020-12-23T03:43:00Z",
+      "value": "0"
     }
   ]
 }
 ```
 
-The `m` represents `milli-units`, so for example, `901m` means 901 milli-requests.
 
-Create a HPA that will scale up the `podinfo` deployment if the number of requests goes over 10 per second:
-
-```yaml
-apiVersion: autoscaling/v2beta2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: podinfo
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: podinfo
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-  - type: Pods
-    pods:
-        metric:
-          name: http_requests
-        target:
-          type: AverageValue
-          averageValue: 10
-```
-
-Deploy the `podinfo` HPA in the `default` namespace:
+Deploy the `productpage` HPA in the `default` namespace:
 
 ```bash
-kubectl create -f ./podinfo/podinfo-hpa-custom.yaml
+kubectl create -f istio-hpa.yaml
 ```
 
 After a couple of seconds the HPA fetches the `http_requests` value from the metrics API:
 
 ```bash
 kubectl get hpa
-
-NAME      REFERENCE            TARGETS     MINPODS   MAXPODS   REPLICAS   AGE
-podinfo   Deployment/podinfo   899m / 10   2         10        2          1m
+```
+```
+NAME                      REFERENCE                   TARGETS       MINPODS   MAXPODS   REPLICAS   AGE
+productpage-obj-service   Deployment/productpage-v1   133333m/100   1         2         1          11h
 ```
 
-Apply some load on the `podinfo` service with 25 requests per second:
+Apply some load on the `productpage` service with 25 requests per second:
 
 ```bash
 #install hey
 go get -u github.com/rakyll/hey
 
 #do 10K requests rate limited at 25 QPS
-hey -n 10000 -q 5 -c 5 http://<K8S-IP>:31198/healthz
+hey -n 1000 -q 5 -c 5 http://<K8S-IP>:31198/productpage
 ```
 
 After a few minutes the HPA begins to scale up the deployment:
@@ -312,32 +180,35 @@ After a few minutes the HPA begins to scale up the deployment:
 ```
 kubectl describe hpa
 
-Name:                       podinfo
-Namespace:                  default
-Reference:                  Deployment/podinfo
-Metrics:                    ( current / target )
-  "http_requests" on pods:  9059m / 10
-Min replicas:               2
-Max replicas:               10
-
+^CXishengdeMacBook-Pro:~ xishengcai$ kubectl describe hpa productpage-obj-service
+Name:                                                              productpage-obj-service
+Namespace:                                                         default
+Labels:                                                            <none>
+Annotations:                                                       kubectl.kubernetes.io/last-applied-configuration:
+                                                                     {"apiVersion":"autoscaling/v2beta1","kind":"HorizontalPodAutoscaler","metadata":{"annotations":{},"name":"productpage-obj-service","namesp...
+CreationTimestamp:                                                 Wed, 23 Dec 2020 00:23:29 +0800
+Reference:                                                         Deployment/productpage-v1
+Metrics:                                                           ( current / target )
+  "istio_requests_per_min" on service/productpage (target value):  0 / 100
+Min replicas:                                                      1
+Max replicas:                                                      2
+Deployment pods:                                                   2 current / 2 desired
+Conditions:
+  Type            Status  Reason               Message
+  ----            ------  ------               -------
+  AbleToScale     True    ScaleDownStabilized  recent recommendations were higher than current one, applying the highest recent recommendation
+  ScalingActive   True    ValidMetricFound     the HPA was able to successfully calculate a replica count from service metric istio_requests_per_min
+  ScalingLimited  True    TooManyReplicas      the desired replica count is more than the maximum replica count
 Events:
-  Type    Reason             Age   From                       Message
-  ----    ------             ----  ----                       -------
-  Normal  SuccessfulRescale  2m    horizontal-pod-autoscaler  New size: 3; reason: pods metric http_requests above target
+  Type     Reason                 Age                   From                       Message
+  ----     ------                 ----                  ----                       -------
+  Warning  FailedGetObjectMetric  36m (x13 over 103m)   horizontal-pod-autoscaler  unable to get metric istio_requests_per_min: service on default productpage/unable to fetch metrics from custom metrics API: no custom metrics API (custom.metrics.k8s.io) registered
+  Warning  FailedGetObjectMetric  33m (x21 over 11h)    horizontal-pod-autoscaler  unable to get metric istio_requests_per_min: service on default productpage/unable to fetch metrics from custom metrics API: the server is currently unable to handle the request (get services.custom.metrics.k8s.io productpage)
+  Warning  FailedGetObjectMetric  13m (x2591 over 11h)  horizontal-pod-autoscaler  unable to get metric istio_requests_per_min: service on default productpage/unable to fetch metrics from custom metrics API: the server could not find the metric istio_requests_per_min for services
+  Normal   SuccessfulRescale      4m3s                  horizontal-pod-autoscaler  New size: 1; reason: All metrics below target
+  Normal   SuccessfulRescale      74s (x2 over 9m39s)   horizontal-pod-autoscaler  New size: 2; reason: service metric istio_requests_per_min above target
 ```
 
-At the current rate of requests per second the deployment will never get to the max value of 10 pods. 
-Three replicas are enough to keep the RPS under 10 per each pod.
-
-After the load tests finishes, the HPA down scales the deployment to it's initial replicas:
-
-```
-Events:
-  Type    Reason             Age   From                       Message
-  ----    ------             ----  ----                       -------
-  Normal  SuccessfulRescale  5m    horizontal-pod-autoscaler  New size: 3; reason: pods metric http_requests above target
-  Normal  SuccessfulRescale  21s   horizontal-pod-autoscaler  New size: 2; reason: All metrics below target
-```
 
 You may have noticed that the autoscaler doesn't react immediately to usage spikes. 
 By default the metrics sync happens once every 30 seconds and scaling up/down can 

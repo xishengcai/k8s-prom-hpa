@@ -13,4 +13,4 @@ kubectl create secret generic cm-adapter-serving-certs \
   --from-file=serving.crt=cert-dir/server.crt \
   --from-file=serving.key=cert-dir/server.key \
   --from-file=ca.crt=cert-dir/ca.crt \
-  -n monitoring
+  -n lstack-system
