@@ -32,7 +32,8 @@ Before you begin you need to install Go 1.8 or later and clone the [k8s-prom-hpa
 
 ```bash
 cd $GOPATH
-git clone https://github.com/stefanprodan/k8s-prom-hpa
+git clone https://github.com/xishengcai/k8s-prom-hpa
+sh genert-cert.sh
 ```
 
 ### Setting up the Metrics Server
