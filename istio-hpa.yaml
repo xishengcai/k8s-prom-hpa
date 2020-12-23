@@ -1,0 +1,45 @@
+apiVersion: autoscaling/v2beta1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: productpage-obj-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: productpage-v1
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Object
+      object:
+        target:
+          kind: service
+          name: productpage
+          apiVersion: v1
+        metricName: istio_requests_per_min
+        targetValue: 100
+#---
+#apiVersion: autoscaling/v2beta1
+#kind: HorizontalPodAutoscaler
+#metadata:
+#  name: productpage-obj-annotation
+#  annotations:
+#    metric-config.object.istio-request-per-10min-count.prometheus/per-replica: 'true'
+#    metric-config.object.istio-request-per-min-count.prometheus/query: >-
+#      increase(istio_request_duration_milliseconds_count{destination_canonical_service="productpage",destination_canonical_revision="v1",response_code="200"}[1m])
+#spec:
+#  scaleTargetRef:
+#    kind: Deployment
+#    name: productpage-v1
+#    apiVersion: apps/v1
+#  minReplicas: 1
+#  maxReplicas: 2
+#  metrics:
+#    - type: Object
+#      object:
+#        target:
+#          kind: Pod
+#          name: productpage-v1
+#          apiVersion: v1
+#        metricName: istio-request-per-min-count
+#        targetValue: '10'
